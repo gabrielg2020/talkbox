@@ -1,3 +1,4 @@
+import getpass
 import sys
 import warnings
 from pathlib import Path
@@ -45,7 +46,7 @@ def show_start_screen():
     console.print(
         Panel(
             Align.center(banner_text()),
-            title="[bold magenta]✦ gabriel's talkbox ✦[/bold magenta]",
+            title=f"[bold magenta]✦ {getpass.getuser()}'s talkbox ✦[/bold magenta]",
             subtitle="[dim]turn your words into sound[/dim]",
             border_style="bright_magenta",
             padding=(1, 4),
