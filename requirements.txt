@@ -1,4 +1,16 @@
-gtts
+# Core TUI
 questionary
 rich
 pyfiglet
+
+# Engines
+gtts            # fast, networked, no timing
+kokoro          # local, offline, native per-word timestamps (needs Python 3.12)
+soundfile       # write Kokoro audio to wav
+
+# Read-along playback
+just-playback   # mp3/wav playback with live position
+readchar        # key handling during playback
+
+# CPU-only torch keeps the Kokoro install ~200MB instead of pulling CUDA wheels:
+#   uv pip install torch --index-url https://download.pytorch.org/whl/cpu

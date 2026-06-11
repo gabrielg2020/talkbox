@@ -3,32 +3,36 @@ import sys
 import warnings
 from pathlib import Path
 
-# urllib3 warns about macOS's LibreSSL on import; it's harmless noise here.
+# urllib3 warns about LibreSSL on import on some platforms; it's harmless noise here.
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 import questionary
-from gtts import gTTS
 from pyfiglet import Figlet
 from questionary import Style
 from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
+
+import engines
+from settings import KOKORO_VOICES, load_settings, save_settings
 
 SOURCE_DIR = Path("source")
 console = Console()
 
 # Warm→cool gradient applied line-by-line across the figlet art.
 GRADIENT = ["#ff5f87", "#ff5faf", "#d75fff", "#af5fff", "#5f87ff", "#5fd7ff"]
+
+SELECT_STYLE = Style(
+    [
+        ("qmark", "fg:#ff79c6 bold"),
+        ("question", "bold"),
+        ("pointer", "fg:#50fa7b bold"),
+        ("highlighted", "fg:#50fa7b bold"),
+        ("selected", "fg:#8be9fd"),
+        ("answer", "fg:#8be9fd bold"),
+    ]
+)
 
 
 def banner_text():
@@ -55,88 +59,175 @@ def show_start_screen():
     console.print()
 
 
-SELECT_STYLE = Style(
-    [
-        ("qmark", "fg:#ff79c6 bold"),
-        ("question", "bold"),
-        ("pointer", "fg:#50fa7b bold"),
-        ("highlighted", "fg:#50fa7b bold"),
-        ("selected", "fg:#8be9fd"),
-        ("answer", "fg:#8be9fd bold"),
-    ]
-)
+BACK = object()  # sentinel returned by pick() for the "← Back" entry or cancel
 
 
-def pick_file(txt_files):
+def select(message, choices, **kwargs):
     return questionary.select(
-        "Which file shall I read aloud?",
-        choices=[f.name for f in txt_files],
-        qmark="🎙️",
+        message,
+        choices=choices,
         pointer="▶",
-        use_search_filter=True,
         use_jk_keys=False,
         style=SELECT_STYLE,
+        **kwargs,
     ).ask()
 
 
-def synthesize(source_path):
-    stem = source_path.stem
-    text = source_path.read_text().rstrip()
-    tts = gTTS(text)
-
-    # gTTS splits text into parts; total lets the bar show a real ETA.
-    parts = list(tts._tokenize(tts.text))
-    out_path = Path(f"{stem}.mp3")
-
-    progress = Progress(
-        SpinnerColumn(spinner_name="dots12", style="bright_magenta"),
-        TextColumn("[bold cyan]{task.description}"),
-        BarColumn(bar_width=None, complete_style="green", finished_style="bright_green"),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-        transient=False,
-    )
-
-    with progress:
-        task = progress.add_task(f"voicing {stem}", total=len(parts))
-        with open(out_path, "wb") as mp3:
-            for data in tts.stream():
-                mp3.write(data)
-                progress.advance(task)
-
-    return out_path
+def pick(message, items, **kwargs):
+    """A select with an explicit '← Back' entry; returns BACK on back or Ctrl-C."""
+    choices = [*items, questionary.Choice("← Back", value=BACK)]
+    answer = select(message, choices, **kwargs)
+    return BACK if answer is None else answer
 
 
-def main():
-    show_start_screen()
+def pause():
+    """Hold the action's output on screen until the user is ready to return."""
+    console.input("\n[dim]↵  press enter to return to the menu[/dim] ")
 
+
+def engine_label(settings):
+    if settings["engine"] == "kokoro":
+        return f"Kokoro ({settings['voice']})"
+    return "gTTS (fast, no read-along)"
+
+
+def do_generate(settings):
     txt_files = sorted(SOURCE_DIR.glob("*.txt"))
     if not txt_files:
         console.print(f"[bold red]✗[/bold red] No .txt files found in [yellow]{SOURCE_DIR}/[/yellow]")
-        sys.exit(1)
+        pause()
+        return
 
-    choice = pick_file(txt_files)
-    if choice is None:  # Ctrl-C / Esc
-        console.print("[dim]…maybe next time.[/dim]")
-        sys.exit(0)
+    choice = pick("Which file shall I read aloud?", [f.name for f in txt_files], qmark="🎙️", use_search_filter=True)
+    if choice is BACK:
+        return
 
     source_path = SOURCE_DIR / choice
-    console.print(f"\n[green]✓[/green] Reading [bold]{source_path}[/bold]\n")
+    text = source_path.read_text().rstrip()
+    console.print(
+        f"\n[green]✓[/green] Voicing [bold]{source_path}[/bold] with [cyan]{engine_label(settings)}[/cyan]\n"
+    )
 
-    out_path = synthesize(source_path)
+    try:
+        result = engines.synthesize(text, source_path.stem, settings["engine"], settings["voice"], console)
+    except ImportError:
+        console.print(
+            "[bold red]✗[/bold red] The Kokoro engine isn't installed. "
+            "Switch to gTTS in Settings, or reinstall dependencies."
+        )
+        pause()
+        return
 
+    read_hint = (
+        "[dim]read along:[/dim] pick [bold]▶ Read along[/bold] from the menu"
+        if result.words is not None
+        else "[dim]no timing data — use the Kokoro engine for read-along[/dim]"
+    )
     console.print()
     console.print(
         Panel(
-            f"[bold green]done![/bold green]  saved → [bold cyan]{out_path}[/bold cyan]\n"
-            f"[dim]play it:[/dim] [yellow]ffplay {out_path}[/yellow]",
+            f"[bold green]done![/bold green]  saved → [bold cyan]{result.audio_path}[/bold cyan]\n"
+            f"[dim]play it:[/dim] [yellow]ffplay {result.audio_path}[/yellow]\n{read_hint}",
             border_style="green",
             padding=(0, 2),
         )
     )
+    pause()
+
+
+def do_read_along():
+    audio_files = sorted(p for ext in ("*.wav", "*.mp3") for p in Path(".").glob(ext))
+    if not audio_files:
+        console.print("[bold red]✗[/bold red] No audio files found. Generate one first.")
+        pause()
+        return
+
+    choices = [
+        questionary.Choice(f"{f.name}    [{engines.describe(f)}]", value=f.name) for f in audio_files
+    ]
+    choice = pick("Which recording shall we read along to?", choices, qmark="▶", use_search_filter=True)
+    if choice is BACK:
+        return
+
+    audio_path = Path(choice)
+    words = engines.load_timings(audio_path)
+    if not words:
+        console.print(
+            f"[bold yellow]![/bold yellow] [bold]{audio_path}[/bold] has no timing data.\n"
+            "[dim]Read-along needs a file generated with the Kokoro engine.[/dim]"
+        )
+        pause()
+        return
+
+    try:
+        from player import read_along
+    except ImportError:
+        console.print("[bold red]✗[/bold red] Playback libraries aren't installed.")
+        pause()
+        return
+
+    read_along(audio_path, words, console)
+
+
+def do_cache_voices():
+    try:
+        engines.cache_all_voices(console)
+    except ImportError:
+        console.print("[bold red]✗[/bold red] The Kokoro engine isn't installed.")
+    pause()
+
+
+def do_settings(settings):
+    engine = pick(
+        "Which voice engine?",
+        [
+            questionary.Choice("Kokoro — local, accurate read-along", value="kokoro"),
+            questionary.Choice("gTTS — fast, networked, no read-along", value="gtts"),
+        ],
+        qmark="⚙",
+    )
+    if engine is BACK:
+        return settings
+
+    settings = {**settings, "engine": engine}
+    if engine == "kokoro":
+        voice = pick("Which Kokoro voice?", KOKORO_VOICES, qmark="🗣️", default=settings["voice"])
+        if voice is not BACK:
+            settings["voice"] = voice
+
+    save_settings(settings)
+    console.print(f"[green]✓[/green] Saved. Using [cyan]{engine_label(settings)}[/cyan].")
+    pause()
+    return settings
+
+
+def main():
+    settings = load_settings()
+
+    while True:
+        show_start_screen()  # clear + banner each time, so old output doesn't pile up
+        action = select(
+            "What shall we do?",
+            choices=[
+                questionary.Choice("🎤  Generate speech from a text file", value="generate"),
+                questionary.Choice("▶   Read along with a recording", value="read"),
+                questionary.Choice("⬇   Download all voices for offline use", value="cache"),
+                questionary.Choice(f"⚙   Settings  [{engine_label(settings)}]", value="settings"),
+                questionary.Choice("🚪  Quit", value="quit"),
+            ],
+            qmark="✦",
+        )
+        if action in (None, "quit"):
+            console.print("[dim]…until next time.[/dim]")
+            return
+        if action == "generate":
+            do_generate(settings)
+        elif action == "read":
+            do_read_along()
+        elif action == "cache":
+            do_cache_voices()
+        elif action == "settings":
+            settings = do_settings(settings)
 
 
 if __name__ == "__main__":

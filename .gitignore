@@ -1,5 +1,12 @@
 # Generated audio output
 *.mp3
+*.wav
+
+# Cached read-along word timings
+*.talkbox.json
+
+# Persisted settings
+config.json
 
 # Input text files (keep the folder, ignore its contents)
 source/*
