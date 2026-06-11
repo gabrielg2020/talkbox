@@ -1,14 +1,20 @@
 """Read-along playback: highlight each word as Kokoro speaks it.
 
-Single-threaded — keys are polled with select() under cbreak mode rather than a
-background reader thread, so nothing lingers to swallow keystrokes once playback
+Playback is driven by mpv (libmpv via python-mpv), which lets us change speed
+live and pitch-corrected. Word timings and mpv's ``time_pos`` are both in media
+time, so the highlight stays in sync at any speed with no extra maths.
+
+Single-threaded input — keys are polled with select() under cbreak mode rather
+than a background reader, so nothing lingers to swallow keystrokes once playback
 ends and the menu comes back.
 """
 
 import bisect
+import os
 import select
 import sys
 import termios
+import threading
 import time
 import tty
 
@@ -18,6 +24,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 FPS = 30
+SPEED_MIN, SPEED_MAX, SPEED_STEP = 0.5, 2.5, 0.1
 
 
 def _page_end(words, start, console):
@@ -42,7 +49,42 @@ def _page_end(words, start, console):
     return i
 
 
-def _render(words, lo, hi, idx, paused, console):
+def _classify_key(data):
+    """Map a raw key byte-sequence to a semantic event (or None to ignore).
+
+    Arrow keys arrive as ``\\x1b[A``/``\\x1b[B`` (or ``\\x1bOA``/``\\x1bOB`` in
+    application-cursor-key mode); a lone ``\\x1b`` is Esc.
+    """
+    return {
+        b" ": "pause",
+        b"q": "quit",
+        b"\x1b[A": "faster",
+        b"\x1bOA": "faster",
+        b"\x1b[B": "slower",
+        b"\x1bOB": "slower",
+        b"\x1b": "quit",
+    }.get(data)
+
+
+def _read_key():
+    """Return a semantic key event, or None.
+
+    Reads with raw os.read so select() (kernel buffer) and the read agree — a
+    buffered sys.stdin.read would slurp an arrow's trailing bytes into userspace,
+    hiding them from select() and making arrows look like a bare Esc. The whole
+    escape burst is grabbed at once; if a lone Esc arrives split from its
+    sequence, a brief second look picks up the rest.
+    """
+    fd = sys.stdin.fileno()
+    if not select.select([sys.stdin], [], [], 0)[0]:
+        return None
+    data = os.read(fd, 16)
+    if data == b"\x1b" and select.select([sys.stdin], [], [], 0.02)[0]:
+        data += os.read(fd, 8)
+    return _classify_key(data)
+
+
+def _render(words, lo, hi, idx, paused, speed, console):
     text = Text(justify="left")
     if lo > 0:
         text.append("… ", style="dim")
@@ -62,7 +104,10 @@ def _render(words, lo, hi, idx, paused, console):
     return Panel(
         Align.center(text, vertical="top"),
         title="[bold magenta]✦ read-along ✦[/bold magenta]",
-        subtitle=f"{status}   [dim]·  space: pause  ·  q: quit[/dim]",
+        subtitle=(
+            f"{status}  [cyan]{speed:g}×[/cyan]   "
+            "[dim]·  space: pause  ·  ↑/↓: speed  ·  q: quit[/dim]"
+        ),
         border_style="bright_magenta",
         padding=(1, 3),
         height=console.size.height,
@@ -70,55 +115,62 @@ def _render(words, lo, hi, idx, paused, console):
 
 
 def read_along(audio_path, words, console):
-    from just_playback import Playback
+    import mpv
 
-    playback = Playback()
-    playback.load_file(str(audio_path))
+    player = mpv.MPV(video=False, terminal=False, osc=False, input_default_bindings=False)
+    ended = threading.Event()
+
+    @player.event_callback("end-file")
+    def _on_end(event):  # runs on mpv's thread; Event is thread-safe
+        ended.set()
+
     starts = [w.start for w in words]
+    speed = 1.0
+    paused = False
+    page_lo, page_hi = 0, _page_end(words, 0, console)
+    last_size = console.size
 
     old_attrs = termios.tcgetattr(sys.stdin)
-    paused = False
-    page_lo = 0
-    page_hi = _page_end(words, page_lo, console)
-    last_size = console.size
     try:
         tty.setcbreak(sys.stdin.fileno())
-        playback.play()
+        player.play(str(audio_path))
+        player.speed = speed
         with Live(
-            _render(words, page_lo, page_hi, -1, paused, console),
+            _render(words, page_lo, page_hi, -1, paused, speed, console),
             console=console,
             refresh_per_second=FPS,
             screen=True,
         ) as live:
-            while playback.active:
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    ch = sys.stdin.read(1)
-                    if ch == " ":
-                        paused = not paused
-                        playback.pause() if paused else playback.resume()
-                    elif ch in ("q", "\x1b"):
-                        break
-                idx = bisect.bisect_right(starts, playback.curr_pos) - 1
+            while not ended.is_set():
+                key = _read_key()
+                if key == "pause":
+                    paused = not paused
+                    player.pause = paused
+                elif key == "quit":
+                    break
+                elif key == "faster":
+                    speed = min(SPEED_MAX, round(speed + SPEED_STEP, 2))
+                    player.speed = speed
+                elif key == "slower":
+                    speed = max(SPEED_MIN, round(speed - SPEED_STEP, 2))
+                    player.speed = speed
 
-                # On resize (e.g. adjusting a tmux pane), the page was wrapped for
-                # the old size. Re-paginate from the start so the cursor lands in
-                # its natural page — the already-read words in that page show above
-                # it (and expanding reveals more), rather than snapping the cursor
-                # to the top with nothing behind it.
+                idx = bisect.bisect_right(starts, player.time_pos or 0.0) - 1
+
+                # Re-paginate from the start on resize so the cursor lands in its
+                # natural page (already-read words show above it); otherwise the
+                # page holds still and flips only once the cursor leaves it.
                 if console.size != last_size:
                     last_size = console.size
                     page_lo, page_hi = 0, _page_end(words, 0, console)
-
-                # Advance to the page holding the cursor: a no-op mid-page, one flip
-                # at a page boundary, several in a row right after a resize.
                 while idx >= page_hi < len(words):
                     page_lo = page_hi
                     page_hi = _page_end(words, page_lo, console)
 
-                live.update(_render(words, page_lo, page_hi, idx, paused, console))
+                live.update(_render(words, page_lo, page_hi, idx, paused, speed, console))
                 time.sleep(1 / FPS)
     except KeyboardInterrupt:
         pass
     finally:
-        playback.stop()
+        player.terminate()
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)

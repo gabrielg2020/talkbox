@@ -17,14 +17,15 @@ Two voice engines:
 
 ## How it works
 
-1. Drop a `.txt` file into the `source/` folder.
+1. Drop a `.txt`, `.md`, or `.docx` file into the `source/` folder.
 2. Run the tool. From the menu you can **generate** speech, **read along** with
    a recording, **download all voices** for offline use, or change **settings**
    (engine + voice).
 3. Generating voices the text with your chosen engine and saves the audio to
    the project root (`.wav` for Kokoro, `.mp3` for gTTS).
 4. Read-along plays a Kokoro recording back and highlights each word as it's
-   spoken, a page at a time — `space` to pause, `q` or `Esc` to quit.
+   spoken, a page at a time — `space` to pause, `↑`/`↓` to change speed (live,
+   pitch-corrected), `q` or `Esc` to quit.
 
 ## Setup
 
@@ -44,6 +45,13 @@ uv venv --python 3.12
 # CPU-only torch keeps the Kokoro install ~200MB rather than pulling CUDA wheels
 uv pip install torch --index-url https://download.pytorch.org/whl/cpu
 uv pip install -r requirements.txt
+```
+
+Read-along playback uses [mpv](https://mpv.io/), so install it once at system
+level (it provides `libmpv`, which `python-mpv` binds to):
+
+```bash
+sudo pacman -S mpv      # or your distro's equivalent / `brew install mpv`
 ```
 
 Everything is free and runs locally — no API keys or accounts. Kokoro downloads
@@ -75,7 +83,8 @@ ffplay prp.wav      # any FFmpeg/audio player works
 talkbox/
 ├── main.py            # TUI: start screen, menu, generate / read-along / voices / settings
 ├── engines.py         # synthesis + per-word timing (gTTS + Kokoro)
-├── player.py          # read-along karaoke playback
+├── loaders.py         # read .txt / .md / .docx into plain text
+├── player.py          # read-along karaoke playback (mpv)
 ├── settings.py        # persisted engine + voice (config.json)
 ├── requirements.txt   # dependencies
 ├── assets/            # README logo
@@ -91,16 +100,17 @@ talkbox/
 
 ## Dependencies
 
-| Package         | Why                                            |
-|-----------------|------------------------------------------------|
-| `kokoro`        | Local TTS with native per-word timestamps      |
-| `gtts`          | Google Text-to-Speech (fast, no timing)        |
-| `soundfile`     | Write Kokoro audio to `.wav`                    |
-| `just-playback` | Audio playback with live position (read-along) |
-| `readchar`      | Key handling during read-along                 |
-| `questionary`   | Arrow-key menus and file picker                |
-| `rich`          | Colours, panels, progress bar, karaoke view    |
-| `pyfiglet`      | ASCII-art banner                               |
+| Package          | Why                                            |
+|------------------|------------------------------------------------|
+| `kokoro`         | Local TTS with native per-word timestamps      |
+| `gtts`           | Google Text-to-Speech (fast, no timing)        |
+| `soundfile`      | Write Kokoro audio to `.wav`                    |
+| `python-mpv`     | Read-along playback with live, pitch-corrected speed |
+| `markdown` + `beautifulsoup4` | Extract clean text from `.md`     |
+| `python-docx`    | Extract text from `.docx`                      |
+| `questionary`    | Arrow-key menus and file picker                |
+| `rich`           | Colours, panels, progress bar, karaoke view    |
+| `pyfiglet`       | ASCII-art banner                               |
 
 ## Notes
 

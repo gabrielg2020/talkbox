@@ -43,7 +43,10 @@ class SynthResult:
 
 
 def timing_path(audio_path):
-    return audio_path.with_suffix(".talkbox.json")
+    # Keep the full filename (incl. extension) so prp.wav and prp.mp3 get
+    # distinct sidecars — otherwise a gTTS .mp3 would inherit a same-stem
+    # Kokoro .wav's timing.
+    return audio_path.with_name(audio_path.name + ".talkbox.json")
 
 
 def save_timings(audio_path, voice, words):

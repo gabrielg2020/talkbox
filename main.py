@@ -15,6 +15,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 import engines
+import loaders
 from settings import KOKORO_VOICES, load_settings, save_settings
 
 SOURCE_DIR = Path("source")
@@ -92,18 +93,31 @@ def engine_label(settings):
 
 
 def do_generate(settings):
-    txt_files = sorted(SOURCE_DIR.glob("*.txt"))
-    if not txt_files:
-        console.print(f"[bold red]✗[/bold red] No .txt files found in [yellow]{SOURCE_DIR}/[/yellow]")
+    files = sorted(p for g in loaders.SUPPORTED_GLOBS for p in SOURCE_DIR.glob(g))
+    if not files:
+        console.print(f"[bold red]✗[/bold red] No documents found in [yellow]{SOURCE_DIR}/[/yellow]")
         pause()
         return
 
-    choice = pick("Which file shall I read aloud?", [f.name for f in txt_files], qmark="🎙️", use_search_filter=True)
+    choice = pick("Which file shall I read aloud?", [f.name for f in files], qmark="🎙️", use_search_filter=True)
     if choice is BACK:
         return
 
     source_path = SOURCE_DIR / choice
-    text = source_path.read_text().rstrip()
+
+    caveat = loaders.caveat_for(source_path)
+    if caveat and not questionary.confirm(
+        f"⚠  {caveat}  Continue anyway?", default=True, style=SELECT_STYLE, qmark="⚠"
+    ).ask():
+        return
+
+    try:
+        text = loaders.load_text(source_path).rstrip()
+    except Exception as err:
+        console.print(f"[bold red]✗[/bold red] Couldn't read [bold]{source_path}[/bold]: {err}")
+        pause()
+        return
+
     console.print(
         f"\n[green]✓[/green] Voicing [bold]{source_path}[/bold] with [cyan]{engine_label(settings)}[/cyan]\n"
     )
@@ -161,12 +175,14 @@ def do_read_along():
 
     try:
         from player import read_along
-    except ImportError:
-        console.print("[bold red]✗[/bold red] Playback libraries aren't installed.")
-        pause()
-        return
 
-    read_along(audio_path, words, console)
+        read_along(audio_path, words, console)
+    except (ImportError, OSError):
+        console.print(
+            "[bold red]✗[/bold red] Read-along needs [bold]mpv[/bold] installed "
+            "(e.g. [yellow]sudo pacman -S mpv[/yellow])."
+        )
+        pause()
 
 
 def do_cache_voices():
