@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="220" viewBox="0 0 760 220" role="img" aria-label="talkbox — text to speech">
+  <defs>
+    <linearGradient id="warmcool" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff5f87"/>
+      <stop offset="20%" stop-color="#ff5faf"/>
+      <stop offset="40%" stop-color="#d75fff"/>
+      <stop offset="60%" stop-color="#af5fff"/>
+      <stop offset="80%" stop-color="#5f87ff"/>
+      <stop offset="100%" stop-color="#5fd7ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="4" y="4" width="752" height="212" rx="22"
+        fill="#0d1117" stroke="url(#warmcool)" stroke-width="3"/>
+
+  <text x="380" y="118" text-anchor="middle"
+        font-family="'DejaVu Sans Mono','Menlo','Consolas',monospace"
+        font-size="98" font-weight="700" letter-spacing="3"
+        fill="url(#warmcool)">talkbox</text>
+
+  <text x="380" y="162" text-anchor="middle"
+        font-family="'DejaVu Sans Mono','Menlo','Consolas',monospace"
+        font-size="24" fill="#7d8590">((&#160;&#160;text&#160;&#160;&#8594;&#160;&#160;speech&#160;&#160;))</text>
+
+  <text x="380" y="192" text-anchor="middle"
+        font-family="'DejaVu Sans Mono','Menlo','Consolas',monospace"
+        font-size="15" fill="#565f6b" font-style="italic">✦&#160;&#160;turn your words into sound&#160;&#160;✦</text>
+</svg>
