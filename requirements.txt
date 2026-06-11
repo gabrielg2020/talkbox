@@ -1,0 +1,4 @@
+gtts
+questionary
+rich
+pyfiglet
