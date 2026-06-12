@@ -16,7 +16,7 @@ KOKORO_VOICES = [
     "bm_lewis",   # British male
 ]
 
-DEFAULTS = {"engine": "kokoro", "voice": "af_heart"}
+DEFAULTS = {"engine": "kokoro", "voice": "af_heart", "resume": True}
 
 
 def load_settings():

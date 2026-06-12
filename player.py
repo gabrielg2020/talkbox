@@ -198,7 +198,9 @@ def _subtitle(paused, speed, volume, pos, total):
     )
 
 
-def read_along(audio_path, words, console):
+def read_along(audio_path, words, console, start_at=0.0):
+    """Play with the karaoke view. Returns the position on exit, or None if it
+    played to the end (so the caller can clear a saved resume point)."""
     import mpv
 
     player = mpv.MPV(video=False, terminal=False, osc=False, input_default_bindings=False)
@@ -217,9 +219,13 @@ def read_along(audio_path, words, console):
     page_lo, page_hi = 0, _page_end(words, 0, console)
     last_size = console.size
 
+    pos = start_at
+    finished = False
     old_attrs = termios.tcgetattr(sys.stdin)
     try:
         tty.setcbreak(sys.stdin.fileno())
+        if start_at > 0:  # resume: mpv's 'start' option begins playback here on load
+            player.start = str(start_at)
         player.play(str(audio_path))
         player.speed = speed
         with Live(
@@ -234,6 +240,7 @@ def read_along(audio_path, words, console):
                     paused = not paused
                     player.pause = paused
                 elif key == "quit":
+                    pos = player.time_pos or pos  # save the spot we quit at
                     break
                 elif key == "faster":
                     speed = min(SPEED_MAX, round(speed + SPEED_STEP, 2))
@@ -276,8 +283,15 @@ def read_along(audio_path, words, console):
                 subtitle = _subtitle(paused, speed, volume, pos, total)
                 live.update(_render(words, page_lo, page_hi, idx, title, subtitle, console))
                 time.sleep(1 / FPS)
+            else:
+                # loop ended because the while condition went false (playback
+                # finished) — not a quit. Decide this *before* the finally, since
+                # player.terminate() fires its own end-file event.
+                finished = True
     except KeyboardInterrupt:
         pass
     finally:
         player.terminate()
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)
+
+    return None if finished else pos  # None = played to the end

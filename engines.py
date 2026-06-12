@@ -86,6 +86,40 @@ def load_timings(audio_path):
     return [Word(**w) for w in meta["words"]]
 
 
+# Resume positions: one small shared file keyed by recording name, rather than
+# rewriting a recording's (large) metadata sidecar on every read-along exit.
+POSITIONS_PATH = RECORDINGS_DIR / ".positions.json"
+
+
+def _load_positions():
+    if not POSITIONS_PATH.exists():
+        return {}
+    try:
+        return json.loads(POSITIONS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_positions(positions):
+    POSITIONS_PATH.write_text(json.dumps(positions) + "\n")
+
+
+def load_position(audio_path):
+    return _load_positions().get(audio_path.name)
+
+
+def save_position(audio_path, seconds):
+    positions = _load_positions()
+    positions[audio_path.name] = round(seconds, 1)
+    _write_positions(positions)
+
+
+def clear_position(audio_path):
+    positions = _load_positions()
+    if positions.pop(audio_path.name, None) is not None:
+        _write_positions(positions)
+
+
 def _gtts_progress(console):
     return Progress(
         SpinnerColumn(spinner_name="dots12", style="bright_magenta"),

@@ -19,17 +19,19 @@ Two voice engines:
 
 1. Drop a `.txt`, `.md`, or `.docx` file into the `source/` folder.
 2. Run the tool. From the menu you can **generate** speech, **read along** with
-   a recording, **download all voices** for offline use, or change **settings**
-   (engine + voice).
+   a recording, **manage** (delete) recordings, **download all voices** for
+   offline use, or change **settings** — split into **Models** (engine + voice)
+   and **Playback** (resume where you left off).
 3. Generating voices the text with your chosen engine and saves the audio to
    `recordings/` (`.wav` for Kokoro, `.mp3` for gTTS). Each recording remembers
    the source file it came from, shown in the read-along picker.
 4. Read-along plays a Kokoro recording back and highlights each word as it's
    spoken, a page at a time, showing progress and the current heading —
    `space` to pause, `↑`/`↓` for speed (live, pitch-corrected), `←`/`→` to seek
-   ±10s, `[`/`]` to jump by block, `+`/`-` for volume, `q` or `Esc` to quit.
-   Headings, paragraphs, and lists from `.md`/`.docx` are rendered with styling
-   and read with natural pauses.
+   ±10s, `[`/`]` to jump by block, `+`/`-` for volume, `q` or `Esc` to quit. It
+   can resume from where you left off (toggle in Settings → Playback). Headings,
+   paragraphs, and lists from `.md`/`.docx` are rendered with styling and read
+   with natural pauses.
 
 ## Setup
 

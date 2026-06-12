@@ -159,23 +159,45 @@ def do_generate(settings):
     if result.words and questionary.confirm(
         "Read along now?", default=True, style=SELECT_STYLE, qmark="📖"
     ).ask():
-        start_read_along(result.audio_path, result.words)
+        start_read_along(result.audio_path, result.words, settings)
     else:
         pause()
 
 
-def start_read_along(audio_path, words):
-    """Launch read-along, reporting a missing mpv cleanly."""
+def _fmt_time(seconds):
+    s = int(seconds)
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def start_read_along(audio_path, words, settings):
+    """Launch read-along, with optional resume, reporting a missing mpv cleanly."""
+    resume_on = settings.get("resume", True)
+
+    start_at = 0.0
+    if resume_on:
+        saved = engines.load_position(audio_path)
+        if saved and saved > 3 and questionary.confirm(
+            f"Resume from {_fmt_time(saved)}?", default=True, style=SELECT_STYLE, qmark="▶"
+        ).ask():
+            start_at = saved
+
     try:
         from player import read_along
 
-        read_along(audio_path, words, console)
+        final = read_along(audio_path, words, console, start_at)
     except (ImportError, OSError):
         console.print(
             "[bold red]✗[/bold red] Read-along needs [bold]mpv[/bold] installed "
             "(e.g. [yellow]sudo pacman -S mpv[/yellow])."
         )
         pause()
+        return
+
+    if resume_on:
+        if final is None:  # played to the end
+            engines.clear_position(audio_path)
+        else:
+            engines.save_position(audio_path, final)
 
 
 def recording_label(audio_path):
@@ -191,7 +213,7 @@ def recording_label(audio_path):
     return f"{label} · from {source} {flag}"
 
 
-def do_read_along():
+def do_read_along(settings):
     audio_files = sorted(
         p for ext in ("*.wav", "*.mp3") for p in engines.RECORDINGS_DIR.glob(ext)
     )
@@ -219,7 +241,7 @@ def do_read_along():
         pause()
         return
 
-    start_read_along(audio_path, words)
+    start_read_along(audio_path, words, settings)
 
 
 def do_manage_recordings():
@@ -247,6 +269,7 @@ def do_manage_recordings():
             path = engines.RECORDINGS_DIR / choice
             path.unlink(missing_ok=True)
             engines.meta_path(path).unlink(missing_ok=True)  # remove its sidecar too
+            engines.clear_position(path)  # and any saved resume point
             console.print(f"[green]✓[/green] Deleted [bold]{choice}[/bold].")
 
 
@@ -258,14 +281,14 @@ def do_cache_voices():
     pause()
 
 
-def do_settings(settings):
+def _settings_models(settings):
     engine = pick(
         "Which voice engine?",
         [
             questionary.Choice("Kokoro — local, accurate read-along", value="kokoro"),
             questionary.Choice("gTTS — fast, networked, no read-along", value="gtts"),
         ],
-        qmark="⚙️",
+        qmark="🎙️",
     )
     if engine is BACK:
         return settings
@@ -280,6 +303,40 @@ def do_settings(settings):
     console.print(f"[green]✓[/green] Saved. Using [cyan]{engine_label(settings)}[/cyan].")
     pause()
     return settings
+
+
+def _settings_playback(settings):
+    on = questionary.confirm(
+        "Resume recordings from where you left off?",
+        default=settings.get("resume", True),
+        style=SELECT_STYLE,
+        qmark="📖",
+    ).ask()
+    if on is None:  # cancelled
+        return settings
+
+    settings = {**settings, "resume": on}
+    save_settings(settings)
+    console.print(f"[green]✓[/green] Resume position [cyan]{'on' if on else 'off'}[/cyan].")
+    pause()
+    return settings
+
+
+def do_settings(settings):
+    resume_label = "on" if settings.get("resume", True) else "off"
+    section = pick(
+        "What would you like to configure?",
+        [
+            questionary.Choice(f"🎙️  Models    [{engine_label(settings)}]", value="models"),
+            questionary.Choice(f"📖  Playback  [resume: {resume_label}]", value="playback"),
+        ],
+        qmark="⚙️",
+    )
+    if section == "models":
+        return _settings_models(settings)
+    if section == "playback":
+        return _settings_playback(settings)
+    return settings  # BACK
 
 
 def main():
@@ -305,7 +362,7 @@ def main():
         if action == "generate":
             do_generate(settings)
         elif action == "read":
-            do_read_along()
+            do_read_along(settings)
         elif action == "manage":
             do_manage_recordings()
         elif action == "cache":
