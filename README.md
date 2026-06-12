@@ -33,7 +33,9 @@ Two voice engines:
    paragraphs, and lists from `.md`/`.docx` are rendered with styling and read
    with natural pauses. It also has **vim-style commands**: `/text` / `?text` to
    search (`n`/`N` to repeat) and `:` for `:toc` (jump to a heading), `:speed 1.5`,
-   `:vol 80`, `:2:30` (jump to time), `:q`, and `:help`.
+   `:vol 80`, `:2:30` (jump to time), `:q`, and `:help`. You can also **scroll
+   back** while it reads — `k`/`j`, `PgUp`/`PgDn`, or the mouse wheel detach into
+   "free look" (audio keeps playing); `f` snaps back to following the cursor.
 
 ## Setup
 

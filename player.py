@@ -71,6 +71,29 @@ def _page_end(words, start, console):
     return i
 
 
+def _line_starts(words, console):
+    """Word index that begins each content line (same wrapping as `_page_end`),
+    deduped so blank block-separator lines don't repeat an index. Used to scroll
+    by line; recompute on a width change."""
+    interior_w = max(10, console.size.width - 8)
+    starts, col = [0], 0
+    for i, w in enumerate(words):
+        if _li_line_start(words, i, 0):
+            col += len(_BULLET)
+        if col > 0 and col + len(w.text) > interior_w and starts[-1] != i:  # soft wrap
+            starts.append(i)
+            col = 0
+        col += len(w.text)
+        for c in w.ws:
+            if c == "\n":  # newline → next word begins a line
+                if i + 1 < len(words) and starts[-1] != i + 1:
+                    starts.append(i + 1)
+                col = 0
+            else:
+                col += 1
+    return starts
+
+
 def _classify_key(data):
     """Map a raw key byte-sequence to a semantic event (or None to ignore).
 
@@ -92,11 +115,28 @@ def _classify_key(data):
         b"[": "prev_block",
         b"n": "search_next",
         b"N": "search_prev",
+        b"k": "scroll_up",
+        b"j": "scroll_down",
+        b"\x1b[5~": "page_up",
+        b"\x1b[6~": "page_down",
+        b"f": "follow",
         b"+": "louder",
         b"=": "louder",  # the unshifted '+' key
         b"-": "softer",
         b"\x1b": "quit",
     }.get(data)
+
+
+def _mouse_scroll(data):
+    """Wheel direction from an SGR mouse report (ESC [ < b ; x ; y M), or None.
+    Needs mouse reporting enabled; wheel up = button 64, down = 65."""
+    if not data.startswith(b"\x1b[<"):
+        return None
+    try:
+        button = int(data[3:].split(b";", 1)[0])
+    except (ValueError, IndexError):
+        return None
+    return "scroll_up" if button == 64 else "scroll_down" if button == 65 else None
 
 
 def _read_raw():
@@ -111,7 +151,7 @@ def _read_raw():
     fd = sys.stdin.fileno()
     if not select.select([sys.stdin], [], [], 0)[0]:
         return None
-    data = os.read(fd, 16)
+    data = os.read(fd, 32)  # 32 is roomy enough for an SGR mouse report
     if data == b"\x1b" and select.select([sys.stdin], [], [], 0.02)[0]:
         data += os.read(fd, 8)
     return data
@@ -283,6 +323,9 @@ _HELP = [
     ("← / →", "seek back / forward"),
     ("[ / ]", "previous / next block"),
     ("+ / -", "volume up / down"),
+    ("k / j", "scroll up / down (free look)"),
+    ("wheel", "scroll · PgUp/PgDn by page"),
+    ("f", "follow the cursor again"),
     ("/text", "search forward"),
     ("?text", "search backward"),
     ("n / N", "repeat search fwd / back"),
@@ -355,7 +398,8 @@ def _subtitle(paused, speed, volume, pos, total):
     )
 
 
-def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, seek_step=SEEK_STEP):
+def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100,
+               seek_step=SEEK_STEP, scroll_pause=False):
     """Play with the karaoke view. Returns the position on exit, or None if it
     played to the end (so the caller can clear a saved resume point)."""
     import mpv
@@ -382,11 +426,18 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
     headings = _headings(words)
     toc_sel = 0
 
+    following = True       # view follows the cursor (vs free-look scrolling)
+    line_cache = None      # _line_starts for the current width (lazy, for free look)
+    top_line = 0           # top display line in free look
+    scroll_paused = False  # we paused the audio for scrolling
+
     pos = start_at
     finished = False
     old_attrs = termios.tcgetattr(sys.stdin)
     try:
         tty.setcbreak(sys.stdin.fileno())
+        sys.stdout.write("\x1b[?1000h\x1b[?1006h")  # enable mouse (wheel) reporting
+        sys.stdout.flush()
         if start_at > 0:  # resume: mpv's 'start' option begins playback here on load
             player.start = str(start_at)
         player.play(str(audio_path))
@@ -410,9 +461,11 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
                             break
                         elif act[0] == "seek":
                             player.seek(max(0.0, act[1]), reference="absolute", precision="exact")
+                            following = True
                         elif act[0] == "search":
                             _seek_to_word(player, words, act[1])
                             last_search = (act[2], act[3])
+                            following = True
                         elif act[0] == "speed":
                             speed = min(SPEED_MAX, max(SPEED_MIN, act[1]))
                             player.speed = speed
@@ -442,6 +495,7 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
                     if data in (b"\r", b"\n"):
                         if headings:
                             _seek_to_word(player, words, headings[toc_sel][1])
+                            following = True
                         mode = "normal"
                         player.pause = paused  # restore play state after the overlay
                     elif data in (b"\x1b", b"q"):
@@ -458,7 +512,7 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
                     if data in (b"/", b"?", b":"):
                         mode, cmd_prefix, cmd_buffer, status_msg = "command", data.decode(), "", ""
                     else:
-                        ev = _classify_key(data)
+                        ev = _mouse_scroll(data) or _classify_key(data)
                         if ev == "pause":
                             paused = not paused
                             player.pause = paused
@@ -479,13 +533,16 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
                             player.volume = volume
                         elif ev == "forward":
                             player.seek(seek_step, reference="relative")
+                            following = True
                         elif ev == "back":
                             player.seek(-seek_step, reference="relative")
+                            following = True
                         elif ev in ("prev_block", "next_block"):
                             cur = bisect.bisect_right(starts, player.time_pos or 0.0) - 1
                             target = _target_block(block_starts, cur, -1 if ev == "prev_block" else 1)
                             if target is not None:
                                 _seek_to_word(player, words, target)
+                                following = True
                         elif ev in ("search_next", "search_prev"):
                             q, d = last_search
                             if q:
@@ -493,21 +550,48 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
                                 m = _search(words, cur, q, d if ev == "search_next" else -d)
                                 if m is not None:
                                     _seek_to_word(player, words, m)
+                                    following = True
                                 else:
                                     status_msg = f"not found: {q}"
+                        elif ev in ("scroll_up", "scroll_down", "page_up", "page_down"):
+                            lpp = max(1, console.size.height - 4)
+                            if line_cache is None:
+                                line_cache = _line_starts(words, console)
+                            if following:  # detach into free look at the current view
+                                following = False
+                                top_line = bisect.bisect_right(line_cache, page_lo) - 1
+                                if scroll_pause and not paused:
+                                    player.pause = True
+                                    scroll_paused = True
+                            step = {"scroll_up": -1, "scroll_down": 1, "page_up": -lpp, "page_down": lpp}[ev]
+                            top_line = max(0, min(len(line_cache) - 1, top_line + step))
+                        elif ev == "follow":
+                            following = True
+                            if scroll_paused:
+                                player.pause = paused
+                                scroll_paused = False
 
                 pos = player.time_pos or pos
                 idx = bisect.bisect_right(starts, pos) - 1
 
-                # Re-paginate from the start on resize or a backwards jump, so the
-                # cursor lands in its natural page (already-read words show above
-                # it); otherwise the page holds still and flips only once the
-                # cursor leaves the bottom.
-                if console.size != last_size or idx < page_lo:
-                    last_size = console.size
-                    page_lo, page_hi = 0, _page_end(words, 0, console)
-                while idx >= page_hi < len(words):
-                    page_lo = page_hi
+                if following:
+                    # Re-paginate from the start on resize or a backwards jump, so
+                    # the cursor lands in its natural page (already-read words show
+                    # above it); otherwise the page holds still and flips only once
+                    # the cursor leaves the bottom.
+                    if console.size != last_size or idx < page_lo:
+                        last_size = console.size
+                        line_cache = None  # width may have changed; rebuild lazily
+                        page_lo, page_hi = 0, _page_end(words, 0, console)
+                    while idx >= page_hi < len(words):
+                        page_lo = page_hi
+                        page_hi = _page_end(words, page_lo, console)
+                else:  # free look — view driven by top_line into the line table
+                    if console.size != last_size or line_cache is None:
+                        last_size = console.size
+                        line_cache = _line_starts(words, console)
+                        top_line = min(top_line, len(line_cache) - 1)
+                    page_lo = line_cache[top_line]
                     page_hi = _page_end(words, page_lo, console)
 
                 if mode == "toc":
@@ -516,7 +600,11 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
                     live.update(_help_panel(console))
                 else:
                     total = player.duration or fallback_total
-                    title = _title(sections[max(idx, 0)] if words else "")
+                    if following:
+                        title = _title(sections[max(idx, 0)] if words else "")
+                    else:
+                        title = ("[bold magenta]✦ read-along ✦[/bold magenta]  "
+                                 "[yellow]⊝ free look[/yellow]  [dim]· f: follow[/dim]")
                     if mode == "command":
                         subtitle = _command_bar(cmd_prefix, cmd_buffer)
                     else:
@@ -533,6 +621,8 @@ def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, 
     except KeyboardInterrupt:
         pass
     finally:
+        sys.stdout.write("\x1b[?1006l\x1b[?1000l")  # disable mouse reporting
+        sys.stdout.flush()
         player.terminate()
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)
 

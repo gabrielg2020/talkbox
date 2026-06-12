@@ -189,6 +189,7 @@ def start_read_along(audio_path, words, settings):
             speed=settings.get("speed", 1.0),
             volume=settings.get("volume", 100),
             seek_step=settings.get("seek_step", 10),
+            scroll_pause=settings.get("scroll_pause", False),
         )
     except (ImportError, OSError):
         console.print(
@@ -325,6 +326,9 @@ def _settings_playback(settings):
                 questionary.Choice(f"Default speed:  {settings.get('speed', 1.0):g}×", value="speed"),
                 questionary.Choice(f"Default volume:  {settings.get('volume', 100)}%", value="volume"),
                 questionary.Choice(f"Seek step (←/→):  {settings.get('seek_step', 10)}s", value="seek_step"),
+                questionary.Choice(
+                    f"Pause audio while scrolling:  {'on' if settings.get('scroll_pause', False) else 'off'}",
+                    value="scroll_pause"),
             ],
             qmark="📖",
         )
@@ -348,6 +352,8 @@ def _settings_playback(settings):
                        default=settings.get("seek_step", 10))
             if v is not None:
                 settings = {**settings, "seek_step": v}
+        elif choice == "scroll_pause":
+            settings = {**settings, "scroll_pause": not settings.get("scroll_pause", False)}
 
         save_settings(settings)
 
