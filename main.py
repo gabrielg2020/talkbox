@@ -139,6 +139,10 @@ def do_generate(settings):
         )
         pause()
         return
+    except KeyboardInterrupt:
+        console.print("\n[yellow]✗ Generation cancelled.[/yellow]")
+        pause()
+        return
 
     read_hint = (
         "[dim]read along:[/dim] pick [bold]📖 Read along[/bold] from the menu"
@@ -465,6 +469,9 @@ def run_file(path_str):
         result = engines.synthesize(blocks, source_path.name, settings["engine"], settings["voice"], console)
     except ImportError:
         console.print("[bold red]✗[/bold red] The Kokoro engine isn't installed.")
+        return
+    except KeyboardInterrupt:
+        console.print("\n[yellow]✗ Generation cancelled.[/yellow]")
         return
 
     if result.words:

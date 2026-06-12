@@ -151,12 +151,16 @@ def _synth_gtts(blocks, source, console):
     parts = list(tts._tokenize(tts.text))
     out_path = RECORDINGS_DIR / f"{stem}.mp3"
 
-    with _progress_bar(console) as progress:
-        task = progress.add_task(f"voicing {stem}", total=len(parts))
-        with open(out_path, "wb") as mp3:
-            for data in tts.stream():
-                mp3.write(data)
-                progress.advance(task)
+    try:
+        with _progress_bar(console) as progress:
+            task = progress.add_task(f"voicing {stem}", total=len(parts))
+            with open(out_path, "wb") as mp3:
+                for data in tts.stream():
+                    mp3.write(data)
+                    progress.advance(task)
+    except KeyboardInterrupt:
+        out_path.unlink(missing_ok=True)  # drop the half-written file
+        raise
 
     save_meta(out_path, "gtts", source, voice=None, words=None)
     return SynthResult(out_path, words=None)
