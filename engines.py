@@ -129,7 +129,7 @@ def clear_position(audio_path):
         _write_positions(positions)
 
 
-def _gtts_progress(console):
+def _progress_bar(console):
     return Progress(
         SpinnerColumn(spinner_name="dots12", style="bright_magenta"),
         TextColumn("[bold cyan]{task.description}"),
@@ -151,7 +151,7 @@ def _synth_gtts(blocks, source, console):
     parts = list(tts._tokenize(tts.text))
     out_path = RECORDINGS_DIR / f"{stem}.mp3"
 
-    with _gtts_progress(console) as progress:
+    with _progress_bar(console) as progress:
         task = progress.add_task(f"voicing {stem}", total=len(parts))
         with open(out_path, "wb") as mp3:
             for data in tts.stream():
@@ -208,20 +208,33 @@ def _block_break(block, next_block):
     return "\n\n"
 
 
-def _run_kokoro_blocks(blocks, voice):
+_PIPELINE_CACHE = {}
+
+
+def _get_pipeline(lang_code):
+    """A cached KPipeline per language — avoids reloading the model on every
+    generation. Voices load per call, so caching by lang_code is safe."""
+    if lang_code not in _PIPELINE_CACHE:
+        from kokoro import KPipeline
+
+        # repo_id is explicit to suppress Kokoro's "defaulting repo_id" warning.
+        _PIPELINE_CACHE[lang_code] = KPipeline(lang_code=lang_code, repo_id=KOKORO_REPO)
+    return _PIPELINE_CACHE[lang_code]
+
+
+def _run_kokoro_blocks(blocks, voice, advance=None):
     """Synthesise each block on its own, so every word carries its block's kind.
 
     Doing it per block (rather than one flat string) gives an exact word→style
     link with no offset-guessing, and lets us drop a silence between blocks so the
     structure is audible. Token timestamps are chunk-relative, so each is offset
-    by the audio elapsed so far — silences included.
+    by the audio elapsed so far — silences included. ``advance(n)`` (optional) is
+    called with each block's word count to drive a progress bar.
     """
     import numpy as np
-    from kokoro import KPipeline
 
     # Voice prefix selects accent: 'a' = American, 'b' = British.
-    # repo_id is passed explicitly to suppress Kokoro's "defaulting repo_id" warning.
-    pipeline = KPipeline(lang_code=voice[0], repo_id=KOKORO_REPO)
+    pipeline = _get_pipeline(voice[0])
 
     audio_parts, words, elapsed = [], [], 0.0
     for i, block in enumerate(blocks):
@@ -243,6 +256,9 @@ def _run_kokoro_blocks(blocks, voice):
             pause = PAUSE_AFTER.get(block.kind, 0.3)
             audio_parts.append(np.zeros(int(pause * KOKORO_SAMPLE_RATE), dtype=np.float32))
             elapsed += pause
+
+        if advance:
+            advance(len(block.text.split()))
 
     return audio_parts, words
 
@@ -282,12 +298,16 @@ def _synth_kokoro(blocks, source, voice, console):
     # letting a never-used voice download. is_offline_mode() reads this live, so
     # toggling per-synth handles switching voices within a session.
     hf.HF_HUB_OFFLINE = _voice_cached(voice)
-    with console.status(f"[bold cyan]voicing {stem} with Kokoro…", spinner="dots12"):
+    total_words = sum(len(b.text.split()) for b in blocks) or 1
+    with _progress_bar(console) as progress:
+        task = progress.add_task(f"voicing {stem}", total=total_words)
+        advance = lambda n: progress.advance(task, n)
         try:
-            audio_parts, words = _run_kokoro_blocks(blocks, voice)
+            audio_parts, words = _run_kokoro_blocks(blocks, voice, advance)
         except (LocalEntryNotFoundError, OfflineModeIsEnabled):
             hf.HF_HUB_OFFLINE = False  # asset wasn't cached after all — fetch it
-            audio_parts, words = _run_kokoro_blocks(blocks, voice)
+            progress.reset(task)
+            audio_parts, words = _run_kokoro_blocks(blocks, voice, advance)
 
     out_path = RECORDINGS_DIR / f"{stem}.wav"
     sf.write(out_path, np.concatenate(audio_parts), KOKORO_SAMPLE_RATE)
