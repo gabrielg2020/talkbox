@@ -26,9 +26,10 @@ Two voice engines:
    the source file it came from, shown in the read-along picker.
 4. Read-along plays a Kokoro recording back and highlights each word as it's
    spoken, a page at a time, showing progress and the current heading —
-   `space` to pause, `↑`/`↓` to change speed (live, pitch-corrected), `+`/`-` for
-   volume, `q` or `Esc` to quit. Headings, paragraphs, and lists from `.md`/`.docx`
-   are rendered with styling and read with natural pauses.
+   `space` to pause, `↑`/`↓` for speed (live, pitch-corrected), `←`/`→` to seek
+   ±10s, `[`/`]` to jump by block, `+`/`-` for volume, `q` or `Esc` to quit.
+   Headings, paragraphs, and lists from `.md`/`.docx` are rendered with styling
+   and read with natural pauses.
 
 ## Setup
 

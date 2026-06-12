@@ -25,6 +25,7 @@ from rich.text import Text
 
 FPS = 30
 SPEED_MIN, SPEED_MAX, SPEED_STEP = 0.5, 2.5, 0.1
+SEEK_STEP = 10  # seconds for ←/→
 
 _BULLET = "  • "
 # Heading colours echo the app's warm→cool gradient; p/li fall back to white.
@@ -83,6 +84,12 @@ def _classify_key(data):
         b"\x1bOA": "faster",
         b"\x1b[B": "slower",
         b"\x1bOB": "slower",
+        b"\x1b[C": "forward",
+        b"\x1bOC": "forward",
+        b"\x1b[D": "back",
+        b"\x1bOD": "back",
+        b"]": "next_block",
+        b"[": "prev_block",
         b"+": "louder",
         b"=": "louder",  # the unshifted '+' key
         b"-": "softer",
@@ -132,6 +139,18 @@ def _build_sections(words):
     return out
 
 
+def _block_starts(words):
+    """Word indices that begin a block (start, or after a block-break newline)."""
+    return [0] + [i for i in range(1, len(words)) if "\n" in words[i - 1].ws]
+
+
+def _target_block(block_starts, idx, direction):
+    """The block-start index one block before/after the current one, or None."""
+    here = bisect.bisect_right(block_starts, max(idx, 0)) - 1
+    target = here + direction
+    return block_starts[target] if 0 <= target < len(block_starts) else None
+
+
 def _render(words, lo, hi, idx, title, subtitle, console):
     text = Text(justify="left")
     if lo > 0:
@@ -175,7 +194,7 @@ def _subtitle(paused, speed, volume, pos, total):
     return (
         f"{status} [cyan]{speed:g}×[/cyan]{vol}  "
         f"[dim]{pct}%  {_fmt_time(pos)}/{_fmt_time(total)}[/dim]   "
-        "[dim]space · ↑↓ speed · +/- vol · q[/dim]"
+        "[dim]space · ←→ 10s · [ ] block · ↑↓ speed · +/- vol · q[/dim]"
     )
 
 
@@ -191,6 +210,7 @@ def read_along(audio_path, words, console):
 
     starts = [w.start for w in words]
     sections = _build_sections(words)
+    block_starts = _block_starts(words)
     fallback_total = words[-1].end if words else 0.0
     speed, volume = 1.0, 100.0
     paused = False
@@ -227,14 +247,24 @@ def read_along(audio_path, words, console):
                 elif key == "softer":
                     volume = max(0, volume - 10)
                     player.volume = volume
+                elif key == "forward":
+                    player.seek(SEEK_STEP, reference="relative")
+                elif key == "back":
+                    player.seek(-SEEK_STEP, reference="relative")
+                elif key in ("prev_block", "next_block"):
+                    cur = bisect.bisect_right(starts, player.time_pos or 0.0) - 1
+                    target = _target_block(block_starts, cur, -1 if key == "prev_block" else 1)
+                    if target is not None:
+                        player.seek(words[target].start, reference="absolute", precision="exact")
 
                 pos = player.time_pos or 0.0
                 idx = bisect.bisect_right(starts, pos) - 1
 
-                # Re-paginate from the start on resize so the cursor lands in its
-                # natural page (already-read words show above it); otherwise the
-                # page holds still and flips only once the cursor leaves it.
-                if console.size != last_size:
+                # Re-paginate from the start on resize or a backwards jump, so the
+                # cursor lands in its natural page (already-read words show above
+                # it); otherwise the page holds still and flips only once the
+                # cursor leaves the bottom.
+                if console.size != last_size or idx < page_lo:
                     last_size = console.size
                     page_lo, page_hi = 0, _page_end(words, 0, console)
                 while idx >= page_hi < len(words):
