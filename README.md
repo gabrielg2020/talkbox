@@ -31,7 +31,9 @@ Two voice engines:
    ±10s, `[`/`]` to jump by block, `+`/`-` for volume, `q` or `Esc` to quit. It
    can resume from where you left off (toggle in Settings → Playback). Headings,
    paragraphs, and lists from `.md`/`.docx` are rendered with styling and read
-   with natural pauses.
+   with natural pauses. It also has **vim-style commands**: `/text` / `?text` to
+   search (`n`/`N` to repeat) and `:` for `:toc` (jump to a heading), `:speed 1.5`,
+   `:vol 80`, `:2:30` (jump to time), `:q`, and `:help`.
 
 ## Setup
 
