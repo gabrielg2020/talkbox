@@ -1,8 +1,9 @@
-# Generated audio output
+# Generated recordings: audio + metadata sidecars (keep the folder, ignore contents)
+recordings/*
+!recordings/.gitkeep
+# also ignore any strays outside the folder
 *.mp3
 *.wav
-
-# Cached read-along word timings
 *.talkbox.json
 
 # Persisted settings

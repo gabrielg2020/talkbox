@@ -1,24 +1,41 @@
-"""Read source documents into plain text for synthesis.
+"""Read source documents into structured blocks for synthesis.
 
-A small registry maps a file extension to how its text is extracted and, where
+A registry maps a file extension to how its blocks are extracted and, where
 extraction can be imperfect, a caveat shown to the user before they commit. Libs
 are imported lazily so a missing optional dependency only bites the format that
 needs it.
+
+A "block" is a heading / paragraph / list item — the structure the read-along
+view renders and that drives the pauses between spoken sections.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional
+
+# Block kinds: h1/h2/h3 headings, p paragraph, li list item.
+HEADINGS = {"h1", "h2", "h3"}
+
+
+@dataclass
+class Block:
+    kind: str
+    text: str
 
 
 @dataclass
 class Loader:
-    extract: Callable[[Path], str]
+    extract: Callable[[Path], List[Block]]
     caveat: Optional[str] = None  # warn + confirm before synth when extraction may be rough
 
 
+def _para_blocks(text):
+    """Split plain text into paragraph blocks on blank lines."""
+    return [Block("p", chunk.strip()) for chunk in text.split("\n\n") if chunk.strip()]
+
+
 def _load_txt(path):
-    return path.read_text()
+    return _para_blocks(path.read_text())
 
 
 def _load_md(path):
@@ -26,19 +43,49 @@ def _load_md(path):
     from bs4 import BeautifulSoup
 
     html = markdown.markdown(path.read_text())
-    return BeautifulSoup(html, "html.parser").get_text("\n")
+    soup = BeautifulSoup(html, "html.parser")
+
+    blocks = []
+    for el in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "pre"]):
+        # containers (li, blockquote) are surfaced themselves; skip the <p> etc.
+        # markdown nests inside them so their text isn't emitted twice
+        if el.find_parent(["li", "blockquote"]):
+            continue
+        text = el.get_text(" ", strip=True)
+        if not text:
+            continue
+        if el.name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            kind = "h" + min(el.name[1], "3")  # cap headings at h3 for styling
+        elif el.name == "li":
+            kind = "li"
+        else:  # p / blockquote / pre(code) read as prose, not dropped
+            kind = "p"
+        blocks.append(Block(kind, text))
+    return blocks
 
 
 def _load_docx(path):
     from docx import Document
 
-    return "\n".join(p.text for p in Document(str(path)).paragraphs)
+    blocks = []
+    for para in Document(str(path)).paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+        style = (para.style.name or "").lower()
+        if style.startswith("heading"):
+            level = "".join(c for c in style if c.isdigit()) or "1"
+            kind = "h" + min(level, "3")
+        elif "list" in style:
+            kind = "li"
+        else:
+            kind = "p"
+        blocks.append(Block(kind, text))
+    return blocks
 
 
-# Reliable formats carry no caveat. A future best-effort format (e.g. PDF) would
-# set one, and do_generate warns automatically — no other wiring needed:
-#   ".pdf": Loader(_load_pdf, "PDFs store layout, not clean text, so word order "
-#                             "and headers/footers may come out imperfect."),
+# Reliable formats carry no caveat. A future best-effort format (e.g. PDF) sets a
+# one-line reason and do_generate warns automatically — no other wiring needed.
 LOADERS = {
     ".txt": Loader(_load_txt),
     ".md": Loader(_load_md),
@@ -48,8 +95,13 @@ LOADERS = {
 SUPPORTED_GLOBS = [f"*{ext}" for ext in LOADERS]
 
 
-def load_text(path):
+def load_blocks(path):
     return LOADERS[path.suffix.lower()].extract(path)
+
+
+def blocks_to_text(blocks):
+    """Flatten blocks to plain text (for the gTTS path, which has no structure)."""
+    return "\n\n".join(b.text for b in blocks)
 
 
 def caveat_for(path):

@@ -112,9 +112,14 @@ def do_generate(settings):
         return
 
     try:
-        text = loaders.load_text(source_path).rstrip()
+        blocks = loaders.load_blocks(source_path)
     except Exception as err:
         console.print(f"[bold red]✗[/bold red] Couldn't read [bold]{source_path}[/bold]: {err}")
+        pause()
+        return
+
+    if not blocks:
+        console.print(f"[bold yellow]![/bold yellow] [bold]{source_path}[/bold] has no readable text.")
         pause()
         return
 
@@ -123,7 +128,7 @@ def do_generate(settings):
     )
 
     try:
-        result = engines.synthesize(text, source_path.stem, settings["engine"], settings["voice"], console)
+        result = engines.synthesize(blocks, source_path.name, settings["engine"], settings["voice"], console)
     except ImportError:
         console.print(
             "[bold red]✗[/bold red] The Kokoro engine isn't installed. "
@@ -149,21 +154,36 @@ def do_generate(settings):
     pause()
 
 
+def recording_label(audio_path):
+    """How a recording was made: engine + voice, its source file, and whether
+    that source still exists in source/."""
+    meta = engines.load_meta(audio_path) or {}
+    engine = meta.get("engine") or ("kokoro" if meta.get("words") else "gtts")
+    label = f"Kokoro · {meta['voice']}" if engine == "kokoro" else "gTTS · no read-along"
+    source = meta.get("source")
+    if not source:
+        return label  # legacy recording with no source recorded
+    flag = "✓" if (SOURCE_DIR / source).exists() else "✗ missing"
+    return f"{label} · from {source} {flag}"
+
+
 def do_read_along():
-    audio_files = sorted(p for ext in ("*.wav", "*.mp3") for p in Path(".").glob(ext))
+    audio_files = sorted(
+        p for ext in ("*.wav", "*.mp3") for p in engines.RECORDINGS_DIR.glob(ext)
+    )
     if not audio_files:
-        console.print("[bold red]✗[/bold red] No audio files found. Generate one first.")
+        console.print("[bold red]✗[/bold red] No recordings found. Generate one first.")
         pause()
         return
 
     choices = [
-        questionary.Choice(f"{f.name}    [{engines.describe(f)}]", value=f.name) for f in audio_files
+        questionary.Choice(f"{f.name}    [{recording_label(f)}]", value=f.name) for f in audio_files
     ]
     choice = pick("Which recording shall we read along to?", choices, qmark="▶", use_search_filter=True)
     if choice is BACK:
         return
 
-    audio_path = Path(choice)
+    audio_path = engines.RECORDINGS_DIR / choice
     words = engines.load_timings(audio_path)
     if not words:
         console.print(

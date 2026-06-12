@@ -26,6 +26,19 @@ from rich.text import Text
 FPS = 30
 SPEED_MIN, SPEED_MAX, SPEED_STEP = 0.5, 2.5, 0.1
 
+_BULLET = "  • "
+# Heading colours echo the app's warm→cool gradient; p/li fall back to white.
+_KIND_STYLE = {
+    "h1": "bold #ff5faf",
+    "h2": "bold #af5fff",
+    "h3": "bold #5fd7ff",
+}
+
+
+def _li_line_start(words, i, first):
+    """True if word i begins a list item's line (so it gets a bullet)."""
+    return words[i].kind == "li" and (i == first or "\n" in words[i - 1].ws)
+
 
 def _page_end(words, start, console):
     """Index one past the last word that fits on a page starting at ``start``.
@@ -36,15 +49,23 @@ def _page_end(words, start, console):
     """
     interior_w = max(10, console.size.width - 8)    # borders + horizontal padding
     interior_h = max(2, console.size.height - 4)    # borders + vertical padding
-    i, lines, col = start, 1, 0
+    i, line, col = start, 1, 0
     while i < len(words):
-        wlen = len(words[i].text) + len(words[i].ws)
-        if col + wlen > interior_w:
-            lines += 1
-            if lines > interior_h:
-                break
+        w = words[i]
+        if _li_line_start(words, i, start):
+            col += len(_BULLET)
+        if col > 0 and col + len(w.text) > interior_w:  # soft wrap
+            line += 1
             col = 0
-        col += wlen
+        if line > interior_h:
+            return i
+        col += len(w.text)
+        for c in w.ws:  # ws may carry the newlines that end blocks
+            if c == "\n":
+                line += 1
+                col = 0
+            else:
+                col += 1
         i += 1
     return i
 
@@ -89,20 +110,23 @@ def _render(words, lo, hi, idx, paused, speed, console):
     if lo > 0:
         text.append("… ", style="dim")
     for i in range(lo, hi):
+        w = words[i]
+        if _li_line_start(words, i, lo):
+            text.append(_BULLET, style="dim" if i < idx else "cyan")
         if i == idx:
-            style = "bold black on bright_cyan"
+            style = "bold black on bright_cyan"  # the word being spoken
         elif i < idx:
-            style = "dim"
+            style = "dim"  # already spoken
         else:
-            style = "white"
-        text.append(words[i].text, style=style)
-        text.append(words[i].ws)
+            style = _KIND_STYLE.get(w.kind, "white")
+        text.append(w.text, style=style)
+        text.append(w.ws)
     if hi < len(words):
         text.append(" …", style="dim")
 
     status = "[yellow]⏸ paused[/yellow]" if paused else "[green]▶ playing[/green]"
     return Panel(
-        Align.center(text, vertical="top"),
+        Align(text, align="left", vertical="top"),
         title="[bold magenta]✦ read-along ✦[/bold magenta]",
         subtitle=(
             f"{status}  [cyan]{speed:g}×[/cyan]   "

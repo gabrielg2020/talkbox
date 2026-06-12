@@ -1,5 +1,9 @@
 # 🎙️ talkbox
 
+<p align="center">
+  <img src="assets/logo.svg" alt="talkbox — text to speech" width="640">
+</p>
+
 A fun little terminal tool that turns text files into speech — with a colourful
 ASCII start screen, an arrow-key file picker, and an optional **read-along**
 view that highlights each word as it's spoken (karaoke-style).
@@ -11,10 +15,6 @@ Two voice engines:
 - **gTTS** — fast, uses Google's servers, no timing data (no read-along).
   Saves `.mp3`.
 
-<p align="center">
-  <img src="assets/logo.svg" alt="talkbox — text to speech" width="640">
-</p>
-
 ## How it works
 
 1. Drop a `.txt`, `.md`, or `.docx` file into the `source/` folder.
@@ -22,10 +22,12 @@ Two voice engines:
    a recording, **download all voices** for offline use, or change **settings**
    (engine + voice).
 3. Generating voices the text with your chosen engine and saves the audio to
-   the project root (`.wav` for Kokoro, `.mp3` for gTTS).
+   `recordings/` (`.wav` for Kokoro, `.mp3` for gTTS). Each recording remembers
+   the source file it came from, shown in the read-along picker.
 4. Read-along plays a Kokoro recording back and highlights each word as it's
    spoken, a page at a time — `space` to pause, `↑`/`↓` to change speed (live,
-   pitch-corrected), `q` or `Esc` to quit.
+   pitch-corrected), `q` or `Esc` to quit. Headings, paragraphs, and lists from
+   `.md`/`.docx` are rendered with styling and read with natural pauses.
 
 ## Setup
 
@@ -71,7 +73,7 @@ can then pick **Read along** to watch it read back. You'll also get a
 ready-to-paste play command:
 
 ```bash
-ffplay prp.wav      # any FFmpeg/audio player works
+ffplay recordings/prp.wav      # any FFmpeg/audio player works
 ```
 
 > Read-along plays audio itself. The `ffplay` hint is just for playing the file
@@ -89,14 +91,16 @@ talkbox/
 ├── requirements.txt   # dependencies
 ├── assets/            # README logo
 ├── docs/agent/        # design rationale and context
-├── source/            # put your .txt input files here (contents gitignored)
+├── source/            # put your .txt/.md/.docx input files here (contents gitignored)
 │   └── .gitkeep       # placeholder so the folder ships empty
-└── *.wav / *.mp3      # generated output (gitignored)
+└── recordings/        # generated audio + metadata sidecars (contents gitignored)
+    └── .gitkeep
 ```
 
-> The repo ships with an empty `source/` (just a `.gitkeep`). Your `.txt`
-> inputs, generated audio, the `*.talkbox.json` timing caches, and `config.json`
-> are all gitignored, so drop your own text files into `source/` to get started.
+> The repo ships with empty `source/` and `recordings/` folders (just a
+> `.gitkeep` each). Your inputs, the generated recordings and their
+> `*.talkbox.json` metadata, and `config.json` are all gitignored, so drop your
+> own files into `source/` to get started.
 
 ## Dependencies
 
@@ -116,5 +120,5 @@ talkbox/
 
 - Best viewed in a truecolor terminal (most modern terminals qualify) so the
   gradient banner and spinner render in full colour.
-- Generated audio (`*.wav`/`*.mp3`) and timing caches are gitignored; your
-  `source/*.txt` inputs are not.
+- Generated recordings (audio + metadata) live in `recordings/` and are
+  gitignored; your `source/` inputs are kept locally too (also gitignored).
