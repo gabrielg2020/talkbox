@@ -83,6 +83,9 @@ def _classify_key(data):
         b"\x1bOA": "faster",
         b"\x1b[B": "slower",
         b"\x1bOB": "slower",
+        b"+": "louder",
+        b"=": "louder",  # the unshifted '+' key
+        b"-": "softer",
         b"\x1b": "quit",
     }.get(data)
 
@@ -105,7 +108,31 @@ def _read_key():
     return _classify_key(data)
 
 
-def _render(words, lo, hi, idx, paused, speed, console):
+def _fmt_time(seconds):
+    s = int(seconds)
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def _build_sections(words):
+    """For each word, the heading currently in effect (for the breadcrumb)."""
+    out = [""] * len(words)
+    current, i = "", 0
+    while i < len(words):
+        if words[i].kind in ("h1", "h2", "h3"):
+            j = i
+            while j < len(words) and words[j].kind == words[i].kind:
+                j += 1
+            current = " ".join(words[k].text for k in range(i, j)).strip()
+            for k in range(i, j):
+                out[k] = current
+            i = j
+        else:
+            out[i] = current
+            i += 1
+    return out
+
+
+def _render(words, lo, hi, idx, title, subtitle, console):
     text = Text(justify="left")
     if lo > 0:
         text.append("… ", style="dim")
@@ -124,17 +151,31 @@ def _render(words, lo, hi, idx, paused, speed, console):
     if hi < len(words):
         text.append(" …", style="dim")
 
-    status = "[yellow]⏸ paused[/yellow]" if paused else "[green]▶ playing[/green]"
     return Panel(
         Align(text, align="left", vertical="top"),
-        title="[bold magenta]✦ read-along ✦[/bold magenta]",
-        subtitle=(
-            f"{status}  [cyan]{speed:g}×[/cyan]   "
-            "[dim]·  space: pause  ·  ↑/↓: speed  ·  q: quit[/dim]"
-        ),
+        title=title,
+        subtitle=subtitle,
         border_style="bright_magenta",
         padding=(1, 3),
         height=console.size.height,
+    )
+
+
+def _title(section):
+    title = "[bold magenta]✦ read-along ✦[/bold magenta]"
+    if section:
+        title += f"  [dim]·[/dim]  [bold]{section}[/bold]"
+    return title
+
+
+def _subtitle(paused, speed, volume, pos, total):
+    status = "[yellow]⏸[/yellow]" if paused else "[green]▶[/green]"
+    pct = int(100 * pos / total) if total else 0
+    vol = f" [dim]vol {int(volume)}%[/dim]" if int(volume) != 100 else ""
+    return (
+        f"{status} [cyan]{speed:g}×[/cyan]{vol}  "
+        f"[dim]{pct}%  {_fmt_time(pos)}/{_fmt_time(total)}[/dim]   "
+        "[dim]space · ↑↓ speed · +/- vol · q[/dim]"
     )
 
 
@@ -149,7 +190,9 @@ def read_along(audio_path, words, console):
         ended.set()
 
     starts = [w.start for w in words]
-    speed = 1.0
+    sections = _build_sections(words)
+    fallback_total = words[-1].end if words else 0.0
+    speed, volume = 1.0, 100.0
     paused = False
     page_lo, page_hi = 0, _page_end(words, 0, console)
     last_size = console.size
@@ -160,7 +203,7 @@ def read_along(audio_path, words, console):
         player.play(str(audio_path))
         player.speed = speed
         with Live(
-            _render(words, page_lo, page_hi, -1, paused, speed, console),
+            _render(words, page_lo, page_hi, -1, _title(""), _subtitle(False, speed, volume, 0, fallback_total), console),
             console=console,
             refresh_per_second=FPS,
             screen=True,
@@ -178,8 +221,15 @@ def read_along(audio_path, words, console):
                 elif key == "slower":
                     speed = max(SPEED_MIN, round(speed - SPEED_STEP, 2))
                     player.speed = speed
+                elif key == "louder":
+                    volume = min(130, volume + 10)
+                    player.volume = volume
+                elif key == "softer":
+                    volume = max(0, volume - 10)
+                    player.volume = volume
 
-                idx = bisect.bisect_right(starts, player.time_pos or 0.0) - 1
+                pos = player.time_pos or 0.0
+                idx = bisect.bisect_right(starts, pos) - 1
 
                 # Re-paginate from the start on resize so the cursor lands in its
                 # natural page (already-read words show above it); otherwise the
@@ -191,7 +241,10 @@ def read_along(audio_path, words, console):
                     page_lo = page_hi
                     page_hi = _page_end(words, page_lo, console)
 
-                live.update(_render(words, page_lo, page_hi, idx, paused, speed, console))
+                total = player.duration or fallback_total
+                title = _title(sections[max(idx, 0)] if words else "")
+                subtitle = _subtitle(paused, speed, volume, pos, total)
+                live.update(_render(words, page_lo, page_hi, idx, title, subtitle, console))
                 time.sleep(1 / FPS)
     except KeyboardInterrupt:
         pass

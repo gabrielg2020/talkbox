@@ -123,8 +123,11 @@ def do_generate(settings):
         pause()
         return
 
+    words_count = sum(len(b.text.split()) for b in blocks)
+    minutes = max(1, round(words_count / 150))  # ~150 wpm is a typical speaking pace
     console.print(
-        f"\n[green]✓[/green] Voicing [bold]{source_path}[/bold] with [cyan]{engine_label(settings)}[/cyan]\n"
+        f"\n[green]✓[/green] Voicing [bold]{source_path}[/bold] with [cyan]{engine_label(settings)}[/cyan]"
+        f"  [dim]≈ {words_count:,} words, ~{minutes} min[/dim]\n"
     )
 
     try:
@@ -138,7 +141,7 @@ def do_generate(settings):
         return
 
     read_hint = (
-        "[dim]read along:[/dim] pick [bold]▶ Read along[/bold] from the menu"
+        "[dim]read along:[/dim] pick [bold]📖 Read along[/bold] from the menu"
         if result.words is not None
         else "[dim]no timing data — use the Kokoro engine for read-along[/dim]"
     )
@@ -151,7 +154,28 @@ def do_generate(settings):
             padding=(0, 2),
         )
     )
-    pause()
+
+    # straight into read-along for Kokoro output, skipping a menu round-trip
+    if result.words and questionary.confirm(
+        "Read along now?", default=True, style=SELECT_STYLE, qmark="📖"
+    ).ask():
+        start_read_along(result.audio_path, result.words)
+    else:
+        pause()
+
+
+def start_read_along(audio_path, words):
+    """Launch read-along, reporting a missing mpv cleanly."""
+    try:
+        from player import read_along
+
+        read_along(audio_path, words, console)
+    except (ImportError, OSError):
+        console.print(
+            "[bold red]✗[/bold red] Read-along needs [bold]mpv[/bold] installed "
+            "(e.g. [yellow]sudo pacman -S mpv[/yellow])."
+        )
+        pause()
 
 
 def recording_label(audio_path):
@@ -176,10 +200,12 @@ def do_read_along():
         pause()
         return
 
+    width = max(len(f.name) for f in audio_files)  # pad names so the labels align
     choices = [
-        questionary.Choice(f"{f.name}    [{recording_label(f)}]", value=f.name) for f in audio_files
+        questionary.Choice(f"{f.name:<{width}}    [{recording_label(f)}]", value=f.name)
+        for f in audio_files
     ]
-    choice = pick("Which recording shall we read along to?", choices, qmark="▶", use_search_filter=True)
+    choice = pick("Which recording shall we read along to?", choices, qmark="📖", use_search_filter=True)
     if choice is BACK:
         return
 
@@ -193,16 +219,35 @@ def do_read_along():
         pause()
         return
 
-    try:
-        from player import read_along
+    start_read_along(audio_path, words)
 
-        read_along(audio_path, words, console)
-    except (ImportError, OSError):
-        console.print(
-            "[bold red]✗[/bold red] Read-along needs [bold]mpv[/bold] installed "
-            "(e.g. [yellow]sudo pacman -S mpv[/yellow])."
+
+def do_manage_recordings():
+    while True:
+        audio_files = sorted(
+            p for ext in ("*.wav", "*.mp3") for p in engines.RECORDINGS_DIR.glob(ext)
         )
-        pause()
+        if not audio_files:
+            console.print("[dim]No recordings to manage.[/dim]")
+            pause()
+            return
+
+        width = max(len(f.name) for f in audio_files)  # pad names so the labels align
+        choices = [
+            questionary.Choice(f"{f.name:<{width}}    [{recording_label(f)}]", value=f.name)
+            for f in audio_files
+        ]
+        choice = pick("Delete which recording?", choices, qmark="🤹")
+        if choice is BACK:
+            return
+
+        if questionary.confirm(
+            f"Delete {choice}?", default=False, style=SELECT_STYLE, qmark="🗑️"
+        ).ask():
+            path = engines.RECORDINGS_DIR / choice
+            path.unlink(missing_ok=True)
+            engines.meta_path(path).unlink(missing_ok=True)  # remove its sidecar too
+            console.print(f"[green]✓[/green] Deleted [bold]{choice}[/bold].")
 
 
 def do_cache_voices():
@@ -220,7 +265,7 @@ def do_settings(settings):
             questionary.Choice("Kokoro — local, accurate read-along", value="kokoro"),
             questionary.Choice("gTTS — fast, networked, no read-along", value="gtts"),
         ],
-        qmark="⚙",
+        qmark="⚙️",
     )
     if engine is BACK:
         return settings
@@ -246,9 +291,10 @@ def main():
             "What shall we do?",
             choices=[
                 questionary.Choice("🎤  Generate speech from a text file", value="generate"),
-                questionary.Choice("▶   Read along with a recording", value="read"),
-                questionary.Choice("⬇   Download all voices for offline use", value="cache"),
-                questionary.Choice(f"⚙   Settings  [{engine_label(settings)}]", value="settings"),
+                questionary.Choice("📖  Read along with a recording", value="read"),
+                questionary.Choice("🤹  Manage recordings", value="manage"),
+                questionary.Choice("📥  Download all voices for offline use", value="cache"),
+                questionary.Choice(f"⚙️  Settings  [{engine_label(settings)}]", value="settings"),
                 questionary.Choice("🚪  Quit", value="quit"),
             ],
             qmark="✦",
@@ -260,6 +306,8 @@ def main():
             do_generate(settings)
         elif action == "read":
             do_read_along()
+        elif action == "manage":
+            do_manage_recordings()
         elif action == "cache":
             do_cache_voices()
         elif action == "settings":

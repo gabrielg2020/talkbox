@@ -25,9 +25,10 @@ Two voice engines:
    `recordings/` (`.wav` for Kokoro, `.mp3` for gTTS). Each recording remembers
    the source file it came from, shown in the read-along picker.
 4. Read-along plays a Kokoro recording back and highlights each word as it's
-   spoken, a page at a time — `space` to pause, `↑`/`↓` to change speed (live,
-   pitch-corrected), `q` or `Esc` to quit. Headings, paragraphs, and lists from
-   `.md`/`.docx` are rendered with styling and read with natural pauses.
+   spoken, a page at a time, showing progress and the current heading —
+   `space` to pause, `↑`/`↓` to change speed (live, pitch-corrected), `+`/`-` for
+   volume, `q` or `Esc` to quit. Headings, paragraphs, and lists from `.md`/`.docx`
+   are rendered with styling and read with natural pauses.
 
 ## Setup
 
