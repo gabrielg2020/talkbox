@@ -24,7 +24,7 @@ from rich.progress import (
 
 KOKORO_SAMPLE_RATE = 24000
 KOKORO_REPO = "hexgrad/Kokoro-82M"
-RECORDINGS_DIR = Path("recordings")
+RECORDINGS_DIR = Path(__file__).resolve().parent / "recordings"
 
 
 @dataclass

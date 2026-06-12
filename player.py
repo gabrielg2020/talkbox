@@ -198,7 +198,7 @@ def _subtitle(paused, speed, volume, pos, total):
     )
 
 
-def read_along(audio_path, words, console, start_at=0.0):
+def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100, seek_step=SEEK_STEP):
     """Play with the karaoke view. Returns the position on exit, or None if it
     played to the end (so the caller can clear a saved resume point)."""
     import mpv
@@ -214,7 +214,7 @@ def read_along(audio_path, words, console, start_at=0.0):
     sections = _build_sections(words)
     block_starts = _block_starts(words)
     fallback_total = words[-1].end if words else 0.0
-    speed, volume = 1.0, 100.0
+    speed, volume = float(speed), float(volume)
     paused = False
     page_lo, page_hi = 0, _page_end(words, 0, console)
     last_size = console.size
@@ -228,6 +228,7 @@ def read_along(audio_path, words, console, start_at=0.0):
             player.start = str(start_at)
         player.play(str(audio_path))
         player.speed = speed
+        player.volume = volume
         with Live(
             _render(words, page_lo, page_hi, -1, _title(""), _subtitle(False, speed, volume, 0, fallback_total), console),
             console=console,
@@ -255,9 +256,9 @@ def read_along(audio_path, words, console, start_at=0.0):
                     volume = max(0, volume - 10)
                     player.volume = volume
                 elif key == "forward":
-                    player.seek(SEEK_STEP, reference="relative")
+                    player.seek(seek_step, reference="relative")
                 elif key == "back":
-                    player.seek(-SEEK_STEP, reference="relative")
+                    player.seek(-seek_step, reference="relative")
                 elif key in ("prev_block", "next_block"):
                     cur = bisect.bisect_right(starts, player.time_pos or 0.0) - 1
                     target = _target_block(block_starts, cur, -1 if key == "prev_block" else 1)

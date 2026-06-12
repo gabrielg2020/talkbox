@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-CONFIG_PATH = Path("config.json")
+CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
 
 # Curated Kokoro voices. Prefix decides accent: 'a' = American, 'b' = British.
 KOKORO_VOICES = [
@@ -16,7 +16,14 @@ KOKORO_VOICES = [
     "bm_lewis",   # British male
 ]
 
-DEFAULTS = {"engine": "kokoro", "voice": "af_heart", "resume": True}
+DEFAULTS = {
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "resume": True,
+    "speed": 1.0,    # read-along starting speed
+    "volume": 100,   # read-along starting volume (%)
+    "seek_step": 10,  # ←/→ seek amount (seconds)
+}
 
 
 def load_settings():

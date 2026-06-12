@@ -18,7 +18,7 @@ import engines
 import loaders
 from settings import KOKORO_VOICES, load_settings, save_settings
 
-SOURCE_DIR = Path("source")
+SOURCE_DIR = Path(__file__).resolve().parent / "source"
 console = Console()
 
 # Warm→cool gradient applied line-by-line across the figlet art.
@@ -184,7 +184,12 @@ def start_read_along(audio_path, words, settings):
     try:
         from player import read_along
 
-        final = read_along(audio_path, words, console, start_at)
+        final = read_along(
+            audio_path, words, console, start_at,
+            speed=settings.get("speed", 1.0),
+            volume=settings.get("volume", 100),
+            seek_step=settings.get("seek_step", 10),
+        )
     except (ImportError, OSError):
         console.print(
             "[bold red]✗[/bold red] Read-along needs [bold]mpv[/bold] installed "
@@ -305,30 +310,62 @@ def _settings_models(settings):
     return settings
 
 
-def _settings_playback(settings):
-    on = questionary.confirm(
-        "Resume recordings from where you left off?",
-        default=settings.get("resume", True),
-        style=SELECT_STYLE,
-        qmark="📖",
-    ).ask()
-    if on is None:  # cancelled
-        return settings
+SPEED_CHOICES = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+VOLUME_CHOICES = [60, 70, 80, 90, 100, 110, 120, 130]
+SEEK_CHOICES = [5, 10, 15, 30]
 
-    settings = {**settings, "resume": on}
-    save_settings(settings)
-    console.print(f"[green]✓[/green] Resume position [cyan]{'on' if on else 'off'}[/cyan].")
-    pause()
-    return settings
+
+def _settings_playback(settings):
+    while True:
+        resume = settings.get("resume", True)
+        choice = pick(
+            "Playback settings",
+            [
+                questionary.Choice(f"Resume from last position:  {'on' if resume else 'off'}", value="resume"),
+                questionary.Choice(f"Default speed:  {settings.get('speed', 1.0):g}×", value="speed"),
+                questionary.Choice(f"Default volume:  {settings.get('volume', 100)}%", value="volume"),
+                questionary.Choice(f"Seek step (←/→):  {settings.get('seek_step', 10)}s", value="seek_step"),
+            ],
+            qmark="📖",
+        )
+        if choice is BACK:
+            return settings
+
+        if choice == "resume":
+            settings = {**settings, "resume": not resume}
+        elif choice == "speed":
+            v = select("Default speed", [questionary.Choice(f"{s:g}×", value=s) for s in SPEED_CHOICES],
+                       default=settings.get("speed", 1.0))
+            if v is not None:
+                settings = {**settings, "speed": v}
+        elif choice == "volume":
+            v = select("Default volume", [questionary.Choice(f"{s}%", value=s) for s in VOLUME_CHOICES],
+                       default=settings.get("volume", 100))
+            if v is not None:
+                settings = {**settings, "volume": v}
+        elif choice == "seek_step":
+            v = select("Seek step", [questionary.Choice(f"{s}s", value=s) for s in SEEK_CHOICES],
+                       default=settings.get("seek_step", 10))
+            if v is not None:
+                settings = {**settings, "seek_step": v}
+
+        save_settings(settings)
+
+
+def _playback_summary(settings):
+    resume = "on" if settings.get("resume", True) else "off"
+    return (
+        f"resume {resume} · speed {settings.get('speed', 1.0):g}× · "
+        f"vol {settings.get('volume', 100)}% · seek {settings.get('seek_step', 10)}s"
+    )
 
 
 def do_settings(settings):
-    resume_label = "on" if settings.get("resume", True) else "off"
     section = pick(
         "What would you like to configure?",
         [
-            questionary.Choice(f"🎙️  Models    [{engine_label(settings)}]", value="models"),
-            questionary.Choice(f"📖  Playback  [resume: {resume_label}]", value="playback"),
+            questionary.Choice(f"🎙️  Models    ·  {engine_label(settings)}", value="models"),
+            questionary.Choice(f"📖  Playback  ·  {_playback_summary(settings)}", value="playback"),
         ],
         qmark="⚙️",
     )
