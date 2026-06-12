@@ -376,7 +376,75 @@ def do_settings(settings):
     return settings  # BACK
 
 
+def run_file(path_str):
+    """One-shot CLI: `talkbox file` — generate (or reuse) a recording and read along."""
+    settings = load_settings()
+    source_path = Path(path_str).expanduser()
+
+    if not source_path.is_file():
+        console.print(f"[bold red]✗[/bold red] No such file: [bold]{source_path}[/bold]")
+        return
+    if source_path.suffix.lower() not in loaders.LOADERS:
+        supported = ", ".join(sorted(loaders.LOADERS))
+        console.print(f"[bold red]✗[/bold red] Unsupported type [bold]{source_path.suffix}[/bold] (try: {supported}).")
+        return
+
+    # reuse an existing read-along recording for this file if there is one
+    existing = engines.RECORDINGS_DIR / f"{source_path.stem}.wav"
+    words = engines.load_timings(existing) if existing.exists() else None
+    if words:
+        meta = engines.load_meta(existing) or {}
+        prev_voice = meta.get("voice")
+        rerender = False
+        # default voice changed since this was made? offer to re-render (once)
+        if (settings["engine"] == "kokoro" and prev_voice
+                and prev_voice != settings["voice"] and not meta.get("pinned")):
+            rerender = questionary.confirm(
+                f"{source_path.name} was voiced with {prev_voice} — re-render with {settings['voice']}?",
+                default=False, style=SELECT_STYLE, qmark="🎙️",
+            ).ask()
+            if not rerender and questionary.confirm(
+                "Keep this recording and stop asking for this file?",
+                default=False, style=SELECT_STYLE, qmark="📖",
+            ).ask():
+                engines.pin_recording(existing)
+
+        if not rerender:
+            console.print(f"[green]✓[/green] Reusing recording for [bold]{source_path.name}[/bold].")
+            start_read_along(existing, words, settings)
+            return  # otherwise fall through and regenerate
+
+    try:
+        blocks = loaders.load_blocks(source_path)
+    except Exception as err:
+        console.print(f"[bold red]✗[/bold red] Couldn't read [bold]{source_path}[/bold]: {err}")
+        return
+    if not blocks:
+        console.print(f"[bold yellow]![/bold yellow] [bold]{source_path}[/bold] has no readable text.")
+        return
+
+    words_count = sum(len(b.text.split()) for b in blocks)
+    console.print(
+        f"[green]✓[/green] Voicing [bold]{source_path.name}[/bold] with "
+        f"[cyan]{engine_label(settings)}[/cyan]  [dim]≈ {words_count:,} words[/dim]"
+    )
+    try:
+        result = engines.synthesize(blocks, source_path.name, settings["engine"], settings["voice"], console)
+    except ImportError:
+        console.print("[bold red]✗[/bold red] The Kokoro engine isn't installed.")
+        return
+
+    if result.words:
+        start_read_along(result.audio_path, result.words, settings)
+    else:
+        console.print(f"[dim]Saved {result.audio_path} — gTTS has no read-along.[/dim]")
+
+
 def main():
+    if len(sys.argv) > 1:  # `talkbox <file>` one-shot, skips the menu
+        run_file(sys.argv[1])
+        return
+
     settings = load_settings()
 
     while True:

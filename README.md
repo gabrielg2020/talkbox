@@ -76,6 +76,23 @@ Pick **Generate**, choose a file, and it voices it. With the Kokoro engine you
 can then pick **Read along** to watch it read back. You'll also get a
 ready-to-paste play command:
 
+### One-shot from the command line
+
+Put the bundled `talkbox` launcher on your PATH and you can voice + read along
+with any file in a single command, from any directory:
+
+```bash
+ln -s "$PWD/talkbox" ~/.local/bin/talkbox   # once
+talkbox ~/notes.md
+```
+
+It generates with your saved default engine/voice and drops straight into
+read-along — reusing an existing recording (and resuming) if you've voiced that
+file before. If you've since changed your default voice, it asks whether to
+re-render (and can stop asking for that file). Accepts `.txt`, `.md`, `.docx`,
+by absolute or relative path.
+
+
 ```bash
 ffplay recordings/prp.wav      # any FFmpeg/audio player works
 ```

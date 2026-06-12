@@ -86,6 +86,15 @@ def load_timings(audio_path):
     return [Word(**w) for w in meta["words"]]
 
 
+def pin_recording(audio_path):
+    """Mark a recording so the CLI stops offering to re-render it after a voice
+    change. Cleared naturally when the recording is regenerated (fresh metadata)."""
+    meta = load_meta(audio_path)
+    if meta is not None:
+        meta["pinned"] = True
+        meta_path(audio_path).write_text(json.dumps(meta) + "\n")
+
+
 # Resume positions: one small shared file keyed by recording name, rather than
 # rewriting a recording's (large) metadata sidecar on every read-along exit.
 POSITIONS_PATH = RECORDINGS_DIR / ".positions.json"

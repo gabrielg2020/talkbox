@@ -1,0 +1,5 @@
+#!/bin/sh
+# talkbox launcher. Resolves the project dir from this script's real location
+# (following symlinks), so it works from a symlink on PATH and any working dir.
+DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+exec "$DIR/.venv/bin/python" "$DIR/main.py" "$@"
