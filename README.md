@@ -64,6 +64,10 @@ level (it provides `libmpv`, which `python-mpv` binds to):
 sudo pacman -S mpv      # or your distro's equivalent / `brew install mpv`
 ```
 
+talkbox auto-detects libmpv, including Homebrew's `/opt/homebrew/lib` on Apple
+Silicon. If it's installed somewhere non-standard and read-along can't find it,
+set the path in **Settings → Advanced**.
+
 Everything is free and runs locally — no API keys or accounts. Kokoro downloads
 its model on first use and each voice the first time you pick it; after that it
 works fully offline. To grab everything ahead of time (e.g. before a trip with

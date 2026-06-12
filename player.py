@@ -10,6 +10,8 @@ ends and the menu comes back.
 """
 
 import bisect
+import ctypes.util
+import glob
 import os
 import select
 import sys
@@ -22,6 +24,50 @@ from rich.align import Align
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
+
+_libmpv_patched = False
+
+
+def _libmpv_candidates():
+    """Standard libmpv locations that ctypes.util.find_library doesn't search by
+    default — chiefly Homebrew's dirs on macOS (Apple Silicon: /opt/homebrew)."""
+    if sys.platform == "darwin":
+        return [
+            "/opt/homebrew/lib/libmpv.dylib", "/opt/homebrew/lib/libmpv.2.dylib",
+            "/usr/local/lib/libmpv.dylib", "/usr/local/lib/libmpv.2.dylib",
+            *sorted(glob.glob("/opt/homebrew/Cellar/mpv/*/lib/libmpv*.dylib"), reverse=True),
+            *sorted(glob.glob("/usr/local/Cellar/mpv/*/lib/libmpv*.dylib"), reverse=True),
+        ]
+    return []  # Linux's find_library normally handles libmpv.so itself
+
+
+def _resolve_libmpv(path):
+    """A usable libmpv file from a file or directory path, or None."""
+    if not path:
+        return None
+    if os.path.isfile(path):
+        return path
+    if os.path.isdir(path):
+        hits = sorted(glob.glob(os.path.join(path, "libmpv*")))
+        return hits[-1] if hits else None
+    return None
+
+
+def _ensure_libmpv(override=None):
+    """Make find_library('mpv') resolve even where it doesn't look by default, so
+    python-mpv loads. Tries an explicit override first, then platform defaults.
+    Leaves things alone if the default lookup already works (e.g. most Linux)."""
+    global _libmpv_patched
+    if _libmpv_patched or (not override and ctypes.util.find_library("mpv")):
+        return
+    for candidate in [override, *_libmpv_candidates()]:
+        found = _resolve_libmpv(candidate)
+        if found:
+            _orig = ctypes.util.find_library
+            ctypes.util.find_library = lambda name, _f=found, _o=_orig: _f if name == "mpv" else _o(name)
+            _libmpv_patched = True
+            return found
+
 
 FPS = 30
 SPEED_MIN, SPEED_MAX, SPEED_STEP = 0.5, 2.5, 0.1
@@ -399,9 +445,10 @@ def _subtitle(paused, speed, volume, pos, total):
 
 
 def read_along(audio_path, words, console, start_at=0.0, speed=1.0, volume=100,
-               seek_step=SEEK_STEP, scroll_pause=False):
+               seek_step=SEEK_STEP, scroll_pause=False, libmpv_path=None):
     """Play with the karaoke view. Returns the position on exit, or None if it
     played to the end (so the caller can clear a saved resume point)."""
+    _ensure_libmpv(libmpv_path)  # find libmpv (e.g. Homebrew on macOS) before import
     import mpv
 
     player = mpv.MPV(video=False, terminal=False, osc=False, input_default_bindings=False)

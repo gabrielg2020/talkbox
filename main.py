@@ -190,11 +190,14 @@ def start_read_along(audio_path, words, settings):
             volume=settings.get("volume", 100),
             seek_step=settings.get("seek_step", 10),
             scroll_pause=settings.get("scroll_pause", False),
+            libmpv_path=settings.get("libmpv_path", ""),
         )
     except (ImportError, OSError):
         console.print(
-            "[bold red]✗[/bold red] Read-along needs [bold]mpv[/bold] installed "
-            "(e.g. [yellow]sudo pacman -S mpv[/yellow])."
+            "[bold red]✗[/bold red] Couldn't load [bold]libmpv[/bold] (needed for read-along).\n"
+            "[dim]Install mpv (macOS: [yellow]brew install mpv[/yellow] · "
+            "Linux: [yellow]sudo pacman -S mpv[/yellow]), or set its path in "
+            "Settings → Advanced.[/dim]"
         )
         pause()
         return
@@ -366,12 +369,34 @@ def _playback_summary(settings):
     )
 
 
+def _settings_advanced(settings):
+    current = settings.get("libmpv_path", "")
+    path = questionary.text(
+        "Custom libmpv path (blank = auto-detect):",
+        default=current,
+        style=SELECT_STYLE,
+        qmark="🔧",
+    ).ask()
+    if path is None:  # cancelled
+        return settings
+
+    settings = {**settings, "libmpv_path": path.strip()}
+    save_settings(settings)
+    console.print(
+        f"[green]✓[/green] libmpv path: [cyan]{settings['libmpv_path'] or 'auto-detect'}[/cyan]."
+    )
+    pause()
+    return settings
+
+
 def do_settings(settings):
+    libmpv = settings.get("libmpv_path") or "auto"
     section = pick(
         "What would you like to configure?",
         [
             questionary.Choice(f"🎙️  Models    ·  {engine_label(settings)}", value="models"),
             questionary.Choice(f"📖  Playback  ·  {_playback_summary(settings)}", value="playback"),
+            questionary.Choice(f"🔧  Advanced  ·  libmpv: {libmpv}", value="advanced"),
         ],
         qmark="⚙️",
     )
@@ -379,6 +404,8 @@ def do_settings(settings):
         return _settings_models(settings)
     if section == "playback":
         return _settings_playback(settings)
+    if section == "advanced":
+        return _settings_advanced(settings)
     return settings  # BACK
 
 

@@ -24,6 +24,7 @@ DEFAULTS = {
     "volume": 100,   # read-along starting volume (%)
     "seek_step": 10,  # ←/→ seek amount (seconds)
     "scroll_pause": False,  # pause audio while scrolling (free look)
+    "libmpv_path": "",  # custom libmpv location (blank = auto-detect)
 }
 
 
